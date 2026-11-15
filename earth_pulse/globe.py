@@ -7,8 +7,17 @@ The page is embedded in Streamlit as an isolated, responsive HTML component.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import streamlit as st
 import streamlit.components.v1 as components
+
+
+interactive_earth_component = components.declare_component(
+    "earth_pulse_interactive_earth_v2",
+    path=str(Path(__file__).with_name("earth_globe_component")),
+)
 
 
 EARTH_GLOBE_HTML = r"""<!doctype html>
@@ -139,6 +148,7 @@ EARTH_GLOBE_HTML = r"""<!doctype html>
 
       const sceneGroup = new THREE.Group();
       scene.add(sceneGroup);
+      const selectedLocation = __EARTH_PULSE_LOCATION__;
 
       scene.add(new THREE.AmbientLight(0x91bed0, 1.05));
       const sun = new THREE.DirectionalLight(0xfff2dc, 2.45);
@@ -166,6 +176,21 @@ EARTH_GLOBE_HTML = r"""<!doctype html>
       const fallbackMaterial = new THREE.MeshPhongMaterial({ color: 0x164f68, shininess: 18, specular: 0x397f94 });
       const earth = new THREE.Mesh(earthGeometry, fallbackMaterial);
       sceneGroup.add(earth);
+      if (selectedLocation) {
+        const latitude = THREE.MathUtils.degToRad(selectedLocation.latitude);
+        const longitude = THREE.MathUtils.degToRad(selectedLocation.longitude + 180);
+        const radius = 1.47;
+        const marker = new THREE.Mesh(
+          new THREE.SphereGeometry(0.045, 18, 18),
+          new THREE.MeshBasicMaterial({ color: 0xffd166 })
+        );
+        marker.position.set(
+          -radius * Math.cos(latitude) * Math.cos(longitude),
+          radius * Math.sin(latitude),
+          radius * Math.cos(latitude) * Math.sin(longitude)
+        );
+        sceneGroup.add(marker);
+      }
 
       const cloudsGeometry = new THREE.SphereGeometry(1.435, 96, 96);
       let clouds = null;
@@ -361,6 +386,32 @@ EARTH_GLOBE_HTML = r"""<!doctype html>
 </html>"""
 
 
-def render_earth_globe(height: int = 500) -> None:
+def render_earth_globe(
+    height: int = 500,
+    latitude: float | None = None,
+    longitude: float | None = None,
+) -> None:
     """Render an interactive, responsive 3D Earth in the Streamlit page."""
-    components.html(EARTH_GLOBE_HTML, height=height, scrolling=False)
+    location = (
+        {"latitude": latitude, "longitude": longitude}
+        if latitude is not None and longitude is not None
+        else None
+    )
+    html = EARTH_GLOBE_HTML.replace(
+        "__EARTH_PULSE_LOCATION__", json.dumps(location, allow_nan=False)
+    )
+    components.html(html, height=height, scrolling=False)
+
+
+def render_interactive_earth_globe(
+    height: int = 560,
+    selected_location: dict[str, float] | None = None,
+    key: str = "earth_pulse_interactive_earth",
+) -> dict | None:
+    """Render the raycast-enabled globe and return clicked coordinates."""
+    return interactive_earth_component(
+        height=height,
+        selected=selected_location,
+        key=key,
+        default=None,
+    )

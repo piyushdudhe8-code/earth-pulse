@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from calendar import monthrange
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
@@ -25,11 +25,13 @@ CITIES: dict[str, dict[str, float]] = {
     "Thane": {"latitude": 19.2183, "longitude": 72.9781},
 }
 
-VARIABLES: dict[str, dict[str, str]] = {
+VARIABLES: dict[str, dict[str, Any]] = {
     "Temperature": {
         "parameter": "T2M",
         "unit": "°C",
         "kind": "mean",
+        "dataset": "NASA MERRA-2 meteorological archive via POWER",
+        "spatial_resolution": "MERRA-2 native grid, approximately 0.5° latitude × 0.625° longitude",
         "description": "Average air temperature 2 metres above the surface.",
         "description_hi": "Zameen se 2 metre upar hawa ka ausat taapman.",
         "display": "Average temperature",
@@ -38,6 +40,8 @@ VARIABLES: dict[str, dict[str, str]] = {
         "parameter": "PRECTOTCORR",
         "unit": "mm/month (estimated)",
         "kind": "rain",
+        "dataset": "NASA MERRA-2 meteorological archive via POWER",
+        "spatial_resolution": "MERRA-2 native grid, approximately 0.5° latitude × 0.625° longitude",
         "description": "Corrected precipitation. NASA's monthly mean daily rate is converted to an estimated monthly total.",
         "description_hi": "Corrected precipitation. NASA ke monthly mean daily rate ko mahine ke dinon se guna karke estimated total banaya jata hai.",
         "display": "Estimated monthly rainfall",
@@ -46,6 +50,8 @@ VARIABLES: dict[str, dict[str, str]] = {
         "parameter": "RH2M",
         "unit": "%",
         "kind": "mean",
+        "dataset": "NASA MERRA-2 meteorological archive via POWER",
+        "spatial_resolution": "MERRA-2 native grid, approximately 0.5° latitude × 0.625° longitude",
         "description": "Average relative humidity 2 metres above the surface.",
         "description_hi": "Zameen se 2 metre upar hawa ki relative humidity ka ausat.",
         "display": "Average relative humidity",
@@ -54,20 +60,37 @@ VARIABLES: dict[str, dict[str, str]] = {
         "parameter": "WS10M",
         "unit": "m/s",
         "kind": "mean",
+        "dataset": "NASA MERRA-2 meteorological archive via POWER",
+        "spatial_resolution": "MERRA-2 native grid, approximately 0.5° latitude × 0.625° longitude",
         "description": "Average wind speed 10 metres above the surface.",
         "description_hi": "Zameen se 10 metre upar hawa ki ausat raftaar.",
         "display": "Average wind speed",
     },
+    "Sunlight": {
+        "parameter": "ALLSKY_SFC_SW_DWN",
+        "unit": "kWh/m²/day",
+        "kind": "mean",
+        "dataset": "NASA GEWEX SRB / CERES SYN1deg / CERES FLASHFlux solar archive via POWER",
+        "spatial_resolution": "NASA POWER solar source-native grid, approximately 1° latitude × 1° longitude",
+        "description": "Mean daily downward shortwave solar energy at the surface under all-sky conditions.",
+        "description_hi": "सभी मौसम स्थितियों में सतह तक पहुंचने वाली औसत दैनिक सौर ऊर्जा।",
+        "display": "Surface solar radiation",
+        "trend_supported": False,
+        "product_note": (
+            "The solar record combines satellite products across time. Source transitions "
+            "can affect long-term trends, so this app does not report a statistical trend "
+            "for this parameter."
+        ),
+    },
 }
 
 
-def _valid_number(value: Any) -> float:
+def _valid_number(value: Any, fill_value: float = -999.0) -> float:
     try:
         number = float(value)
     except (TypeError, ValueError):
         return np.nan
-    # POWER missing/fill values are large negative sentinels (e.g. -999).
-    if not np.isfinite(number) or number <= -900:
+    if not np.isfinite(number) or number <= -900 or number == fill_value:
         return np.nan
     return number
 
@@ -126,12 +149,20 @@ def fetch_nasa_monthly(
         payload = response.json()
     except ValueError as exc:
         raise RuntimeError("NASA POWER returned a response that was not valid JSON.") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("NASA POWER returned an unexpected JSON response.")
 
-    properties = payload.get("properties") if isinstance(payload, dict) else None
+    header = payload.get("header")
+    header = header if isinstance(header, dict) else {}
+    try:
+        fill_value = float(header.get("fill_value", -999.0))
+    except (TypeError, ValueError):
+        fill_value = -999.0
+    properties = payload.get("properties")
     parameters = properties.get("parameter") if isinstance(properties, dict) else None
     values = parameters.get(parameter) if isinstance(parameters, dict) else None
     if not isinstance(values, dict):
-        message = payload.get("messages") if isinstance(payload, dict) else None
+        message = payload.get("messages")
         detail = f" NASA POWER message: {message}" if message else ""
         raise RuntimeError(
             f"NASA POWER response did not contain monthly values for {parameter}.{detail}"
@@ -142,9 +173,14 @@ def fetch_nasa_monthly(
         if len(str(key)) != 6 or not str(key).isdigit():
             continue
         year, month = int(str(key)[:4]), int(str(key)[4:6])
-        if month < 1 or month > 12:
+        if month < 1 or month > 12 or year < start_year or year > end_year:
             continue
-        records.append({"date": pd.Timestamp(year=year, month=month, day=1), "value": _valid_number(raw_value)})
+        records.append(
+            {
+                "date": pd.Timestamp(year=year, month=month, day=1),
+                "value": _valid_number(raw_value, fill_value),
+            }
+        )
 
     if not records:
         raise RuntimeError("NASA POWER returned no monthly values for this request.")
@@ -158,17 +194,50 @@ def fetch_nasa_monthly(
             f"NASA POWER returned no valid monthly observations for {parameter} "
             f"from {start_year} to {end_year}."
         )
-    frame.attrs["source"] = "NASA POWER live API"
+    frame.attrs["source"] = "NASA POWER Monthly and Annual API (periodic monthly data; not instantaneous)"
     frame.attrs["parameter"] = parameter
     frame.attrs["request_url"] = response.url
-    header = payload.get("header")
-    header = header if isinstance(header, dict) else {}
     api = header.get("api")
     api = api if isinstance(api, dict) else {}
     sources = header.get("sources")
     sources = sources if isinstance(sources, list) else []
-    frame.attrs["api_version"] = api.get("version", "unknown")
-    frame.attrs["data_sources"] = ", ".join(sources) or "NASA POWER"
+    parameter_details = payload.get("parameters")
+    parameter_details = (
+        parameter_details.get(parameter)
+        if isinstance(parameter_details, dict)
+        else None
+    )
+    parameter_details = parameter_details if isinstance(parameter_details, dict) else {}
+    geometry = payload.get("geometry")
+    coordinates = geometry.get("coordinates") if isinstance(geometry, dict) else None
+    valid_count = int(frame["value"].notna().sum())
+    frame.attrs.update(
+        {
+            "api_title": header.get("title", "NASA POWER Monthly and Annual API"),
+            "api_version": api.get("version", "unknown"),
+            "dataset": VARIABLES[variable]["dataset"],
+            "data_sources": ", ".join(str(source) for source in sources) or "NASA POWER; source not identified",
+            "api_unit": parameter_details.get("units", "not provided"),
+            "api_long_name": parameter_details.get("longname", variable),
+            "api_parameter_metadata": parameter_details.copy(),
+            "display_unit": VARIABLES[variable]["unit"],
+            "spatial_resolution": VARIABLES[variable]["spatial_resolution"],
+            "api_longitude": coordinates[0] if isinstance(coordinates, list) and len(coordinates) >= 2 else None,
+            "api_latitude": coordinates[1] if isinstance(coordinates, list) and len(coordinates) >= 2 else None,
+            "api_elevation_m": coordinates[2] if isinstance(coordinates, list) and len(coordinates) >= 3 else None,
+            "requested_start": f"{start_year}-01",
+            "requested_end": f"{end_year}-12",
+            "expected_observations": len(expected),
+            "valid_observations": valid_count,
+            "missing_observations": len(expected) - valid_count,
+            "latest_valid_date": frame.index[frame["value"].notna()].max().strftime("%Y-%m"),
+            "observed_start": frame.index[frame["value"].notna()].min().strftime("%Y-%m"),
+            "observed_end": frame.index[frame["value"].notna()].max().strftime("%Y-%m"),
+            "fill_value": fill_value,
+            "response_header": header.copy(),
+        }
+    )
+    frame.attrs["retrieved_at"] = datetime.now(timezone.utc).isoformat()
     return frame
 
 
@@ -217,5 +286,9 @@ def make_demo_series(city: str, variable: str, start_year: int = 2004, end_year:
     frame.attrs["parameter"] = VARIABLES[variable]["parameter"]
     frame.attrs["api_version"] = "synthetic demo"
     frame.attrs["data_sources"] = "synthetic; not NASA data"
+    frame.attrs["dataset"] = "Synthetic demonstration generator; not an observation dataset"
+    frame.attrs["api_unit"] = "synthetic values"
+    frame.attrs["display_unit"] = VARIABLES[variable]["unit"]
+    frame.attrs["spatial_resolution"] = "Not applicable to synthetic demonstration data"
     frame.attrs["request_url"] = "N/A — synthetic demo data"
     return frame

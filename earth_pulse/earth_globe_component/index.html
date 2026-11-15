@@ -1,0 +1,661 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: transparent; font-family: Inter, system-ui, sans-serif; }
+    #stage { position: relative; width: 100%; height: 100%; min-height: 560px; overflow: hidden; border: 1px solid rgba(132,207,179,.25); border-radius: 22px; background: radial-gradient(ellipse at 50% 50%, #0c302f, #071313 72%); }
+    #stage:fullscreen { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; z-index: 9999; border: 0; border-radius: 0; }
+    #globe { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+    #globe:active { cursor: grabbing; }
+    .kicker { position: absolute; top: 14px; left: 16px; z-index: 2; color: #a9efca; font-size: 10px; font-weight: 800; letter-spacing: .16em; pointer-events: none; text-shadow: 0 2px 10px #000; }
+    .controls { position: absolute; top: 12px; right: 12px; z-index: 4; width: min(390px, calc(100% - 24px)); display: grid; gap: 8px; padding: 8px; border: 1px solid rgba(132,207,179,.25); border-radius: 14px; background: rgba(5,22,22,.78); backdrop-filter: blur(8px); }
+    .control-row { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 5px; }
+    button { display: grid; place-items: center; min-width: 36px; height: 36px; padding: 0 8px; border: 1px solid rgba(132,207,179,.2); border-radius: 9px; background: #153b36; color: #e6f4eb; font: 600 17px/1 system-ui,sans-serif; cursor: pointer; }
+    button:hover, button:focus-visible { border-color: #9be7c4; outline: 2px solid rgba(155,231,196,.4); outline-offset: 1px; }
+    button:disabled { opacity: .48; cursor: not-allowed; }
+    button[aria-pressed="true"] { border-color: #9be7c4; background: #245d4d; color: #d8ffea; }
+    .zoom-control { display: grid; grid-template-columns: auto minmax(72px, 1fr) auto; align-items: center; gap: 8px; color: #d3e6dc; font-size: 11px; }
+    #zoom-slider { width: 100%; margin: 0; accent-color: #9be7c4; cursor: pointer; }
+    #zoom-level { min-width: 70px; color: #a9efca; text-align: right; white-space: nowrap; }
+    #status { position: absolute; z-index: 3; left: 50%; bottom: 50px; transform: translateX(-50%); width: max-content; max-width: calc(100% - 24px); padding: 7px 11px; border: 1px solid rgba(132,207,179,.25); border-radius: 999px; background: rgba(5,22,22,.78); color: #d3e6dc; font-size: 10px; text-align: center; pointer-events: none; }
+    #status:empty { display: none; }
+    .caption { position: absolute; z-index: 2; bottom: 10px; left: 50%; transform: translateX(-50%); width: max-content; max-width: calc(100% - 24px); color: #b7d0c4; font-size: 10px; text-align: center; pointer-events: none; text-shadow: 0 1px 5px #000; }
+    .credit { position: absolute; z-index: 2; bottom: 28px; left: 50%; transform: translateX(-50%); width: max-content; max-width: calc(100% - 24px); color: #9eb1ad; font-size: 9px; text-align: center; pointer-events: none; text-shadow: 0 1px 5px #000; }
+    @media (max-width: 640px) { #stage { min-height: 480px; } .controls { top: 48px; right: 8px; width: min(330px, calc(100% - 16px)); } .control-row { gap: 3px; } button { min-width: 32px; height: 32px; padding: 0 6px; font-size: 15px; } #zoom-level { min-width: 64px; } }
+    @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="stage">
+    <div class="kicker">EARTH SYSTEMS · CLICK TO SELECT</div>
+    <canvas id="globe" aria-label="Interactive Earth. Drag to rotate, click a point to select it." role="img"></canvas>
+    <div class="controls" role="group" aria-label="Earth controls">
+      <div class="control-row">
+        <button id="zoom-in" type="button" aria-label="Zoom in" title="Zoom in">+</button>
+        <button id="zoom-out" type="button" aria-label="Zoom out" title="Zoom out">−</button>
+        <button id="reset" type="button" aria-label="Reset view" title="Reset view">↺</button>
+        <button id="fullscreen" type="button" aria-label="Enter fullscreen" title="Enter fullscreen">⛶</button>
+        <button id="auto-rotate" type="button" aria-label="Auto rotate off" aria-pressed="false" title="Turn auto rotation on">Auto</button>
+        <button id="center-location" type="button" aria-label="Center selected location" title="Center selected location" disabled>◎</button>
+      </div>
+      <label class="zoom-control" for="zoom-slider">
+        <span>Zoom</span>
+        <input id="zoom-slider" type="range" min="0" max="1000" value="0" aria-label="Globe zoom level">
+        <output id="zoom-level" for="zoom-slider">World view</output>
+      </label>
+    </div>
+    <div id="status">Loading Earth imagery…</div>
+    <div id="credit" class="credit"></div>
+    <div class="caption">Drag to rotate · Scroll or pinch to zoom · Click the globe to investigate</div>
+  </div>
+  <script type="module">
+    const status = document.getElementById("status");
+    const canvas = document.getElementById("globe");
+    const stage = document.getElementById("stage");
+    const zoomSlider = document.getElementById("zoom-slider");
+    const zoomLevel = document.getElementById("zoom-level");
+    const autoRotateButton = document.getElementById("auto-rotate");
+    const centerLocationButton = document.getElementById("center-location");
+    const RADIUS = 1.42;
+    const MAX_RENDERED_LEVEL = 18;
+    const IMAGE_SERVICE = "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer";
+
+    try {
+      const [{ Streamlit }, THREE] = await Promise.all([
+        import("https://cdn.jsdelivr.net/npm/streamlit-component-lib@2.0.0/+esm"),
+        import("three"),
+      ]);
+      const { OrbitControls } = await import("https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js");
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
+      camera.position.set(0, 0, 5);
+      const renderer = new THREE.WebGLRenderer({
+        canvas, alpha: true, antialias: true, powerPreference: "low-power",
+      });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.25;
+
+      const earthGroup = new THREE.Group();
+      earthGroup.rotation.set(0.12, -0.48, 0);
+      scene.add(earthGroup);
+      scene.add(new THREE.AmbientLight(0xa6c9d7, 1.45));
+      const sun = new THREE.DirectionalLight(0xfff2dc, 2.45);
+      sun.position.set(-3.8, 2.1, 4.6);
+      scene.add(sun);
+      const fill = new THREE.DirectionalLight(0x1c7ca0, 0.3);
+      fill.position.set(3.5, -1.2, -3.5);
+      scene.add(fill);
+
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.07;
+      controls.enablePan = false;
+      controls.rotateSpeed = 0.65;
+      controls.zoomSpeed = 0.8;
+      controls.minPolarAngle = 0.01;
+      controls.maxPolarAngle = Math.PI - 0.01;
+      controls.touches.ONE = THREE.TOUCH.ROTATE;
+      controls.touches.TWO = THREE.TOUCH.DOLLY_ROTATE;
+
+      const textureLoader = new THREE.TextureLoader();
+      textureLoader.setCrossOrigin("anonymous");
+      const earth = new THREE.Mesh(
+        new THREE.SphereGeometry(RADIUS, 112, 80),
+        new THREE.MeshPhongMaterial({ color: 0x164f68, shininess: 18, specular: 0x397f94 }),
+      );
+      earthGroup.add(earth);
+
+      const marker = new THREE.Mesh(
+        new THREE.SphereGeometry(0.035, 18, 14),
+        new THREE.MeshBasicMaterial({ color: 0xffd166 }),
+      );
+      marker.visible = false;
+      earthGroup.add(marker);
+
+      const atmosphere = new THREE.Mesh(
+        new THREE.SphereGeometry(RADIUS * 1.04, 72, 48),
+        new THREE.ShaderMaterial({
+          vertexShader: `
+            varying vec3 vNormal;
+            varying vec3 vView;
+            void main() {
+              vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
+              vNormal = normalize(normalMatrix * normal);
+              vView = -viewPosition.xyz;
+              gl_Position = projectionMatrix * viewPosition;
+            }
+          `,
+          fragmentShader: `
+            varying vec3 vNormal;
+            varying vec3 vView;
+            void main() {
+              float rim = pow(1.0 - max(dot(normalize(vNormal), normalize(vView)), 0.0), 2.3);
+              gl_FragColor = vec4(0.16, 0.62, 0.92, rim * 0.55);
+            }
+          `,
+          side: THREE.BackSide, blending: THREE.AdditiveBlending,
+          transparent: true, depthWrite: false,
+        }),
+      );
+      earthGroup.add(atmosphere);
+
+      const tileLayer = new THREE.Group();
+      earthGroup.add(tileLayer);
+      const tileCache = new Map();
+      let tileRequestVersion = 0;
+      let providerMaxLevel = 0;
+      let fitDistance = 5;
+      let lastMarkerKey = "";
+      let tileTimer = 0;
+      let componentReady = false;
+      let requestedFrameHeight = 640;
+      let zoomTargetDistance = null;
+      let selectedCoordinate = null;
+      let lastAutoRotateTileUpdate = 0;
+
+      const setMarker = (selected) => {
+        const key = selected && Number.isFinite(selected.latitude) && Number.isFinite(selected.longitude)
+          ? `${selected.latitude.toFixed(5)},${selected.longitude.toFixed(5)}`
+          : "";
+        selectedCoordinate = key ? { latitude: selected.latitude, longitude: selected.longitude } : null;
+        centerLocationButton.disabled = !selectedCoordinate;
+        if (key === lastMarkerKey) return;
+        lastMarkerKey = key;
+        marker.visible = Boolean(key);
+        if (!key) return;
+        const latitude = THREE.MathUtils.degToRad(selected.latitude);
+        const longitude = THREE.MathUtils.degToRad(selected.longitude);
+        const radius = RADIUS * 1.022;
+        marker.position.set(
+          radius * Math.cos(latitude) * Math.cos(longitude),
+          radius * Math.sin(latitude),
+          -radius * Math.cos(latitude) * Math.sin(longitude),
+        );
+      };
+      const updateMarkerScale = () => {
+        if (!marker.visible || canvas.clientHeight <= 0) return;
+        const markerWorldPosition = marker.getWorldPosition(new THREE.Vector3());
+        const markerDistance = camera.position.distanceTo(markerWorldPosition);
+        const markerDiameter = (
+          2 * markerDistance * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))
+          * 10 / canvas.clientHeight
+        );
+        marker.scale.setScalar(markerDiameter / 0.07);
+      };
+
+      const mercatorLatitude = (tileY, level) =>
+        Math.atan(Math.sinh(Math.PI * (1 - 2 * tileY / (2 ** level)))) * 180 / Math.PI;
+      const requestedImageryLevel = (distance) => Math.floor(
+        Math.log2(RADIUS / Math.max(0.00001, distance - RADIUS)),
+      ) + 5;
+
+      const makeTileGeometry = (x, y, level, shellOffset) => {
+        const divisions = 32;
+        const count = 2 ** level;
+        const positions = [];
+        const uvs = [];
+        const indices = [];
+        for (let row = 0; row <= divisions; row++) {
+          const v = row / divisions;
+          const latitude = THREE.MathUtils.degToRad(mercatorLatitude(y + v, level));
+          for (let column = 0; column <= divisions; column++) {
+            const u = column / divisions;
+            const longitude = ((x + u) / count * 360 - 180) * Math.PI / 180;
+            positions.push(
+              (RADIUS + shellOffset) * Math.cos(latitude) * Math.cos(longitude),
+              (RADIUS + shellOffset) * Math.sin(latitude),
+              -(RADIUS + shellOffset) * Math.cos(latitude) * Math.sin(longitude),
+            );
+            uvs.push(u, 1 - v);
+          }
+        }
+        for (let row = 0; row < divisions; row++) {
+          for (let column = 0; column < divisions; column++) {
+            const topLeft = row * (divisions + 1) + column;
+            const topRight = topLeft + 1;
+            const bottomLeft = topLeft + divisions + 1;
+            const bottomRight = bottomLeft + 1;
+            indices.push(topLeft, bottomLeft, topRight, topRight, bottomLeft, bottomRight);
+          }
+        }
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+        geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+        geometry.setIndex(indices);
+        geometry.computeVertexNormals();
+        return geometry;
+      };
+
+      const getTileTexture = (url) => new Promise((resolve) => {
+        if (tileCache.has(url)) {
+          resolve(tileCache.get(url));
+          return;
+        }
+        textureLoader.load(url, (texture) => {
+          texture.colorSpace = THREE.SRGBColorSpace;
+          tileCache.set(url, texture);
+          while (tileCache.size > 36) {
+            const oldestKey = tileCache.keys().next().value;
+            const oldest = tileCache.get(oldestKey);
+            oldest.dispose();
+            tileCache.delete(oldestKey);
+          }
+          resolve(texture);
+        }, undefined, () => resolve(null));
+      });
+
+      const updateTiles = async () => {
+        if (!providerMaxLevel) return;
+        const distance = camera.position.distanceTo(controls.target);
+        const surfaceGap = Math.max(0.00001, distance - RADIUS);
+        const maximumLevel = Math.min(providerMaxLevel, MAX_RENDERED_LEVEL);
+        const requestedLevel = requestedImageryLevel(distance);
+        if (requestedLevel < 5 || maximumLevel < 2) {
+          tileRequestVersion += 1;
+          for (const child of [...tileLayer.children]) {
+            tileLayer.remove(child);
+            child.geometry.dispose();
+            child.material.dispose();
+          }
+          status.textContent = "";
+          updateZoomControls();
+          return;
+        }
+        const level = THREE.MathUtils.clamp(
+          requestedLevel,
+          Math.min(5, maximumLevel),
+          maximumLevel,
+        );
+        const version = ++tileRequestVersion;
+        const outward = camera.position.clone().sub(controls.target).normalize();
+        outward.applyQuaternion(earthGroup.quaternion.clone().invert());
+        const latitude = Math.asin(THREE.MathUtils.clamp(outward.y, -1, 1)) * 180 / Math.PI;
+        const longitude = Math.atan2(-outward.z, outward.x) * 180 / Math.PI;
+        const count = 2 ** level;
+        const centerX = Math.floor((longitude + 180) / 360 * count);
+        const clampedLatitude = THREE.MathUtils.clamp(latitude, -85.05112878, 85.05112878);
+        const sinLatitude = Math.sin(clampedLatitude * Math.PI / 180);
+        const centerY = Math.floor(
+          (0.5 - Math.log((1 + sinLatitude) / (1 - sinLatitude)) / (4 * Math.PI)) * count,
+        );
+        const tiles = [];
+        for (let dy = -1; dy <= 1; dy++) {
+          const y = centerY + dy;
+          if (y < 0 || y >= count) continue;
+          for (let dx = -1; dx <= 1; dx++) {
+            const x = (centerX + dx + count) % count;
+            tiles.push({ x, y, level });
+          }
+        }
+        for (const child of [...tileLayer.children]) {
+          tileLayer.remove(child);
+          child.geometry.dispose();
+          child.material.dispose();
+        }
+        const textures = await Promise.all(tiles.map(({ x, y, level: z }) =>
+          getTileTexture(`${IMAGE_SERVICE}/tile/${z}/${y}/${x}`),
+        ));
+        if (version !== tileRequestVersion) return;
+        const shellOffset = Math.min(0.0004, surfaceGap * 0.25);
+        textures.forEach((texture, index) => {
+          if (!texture) return;
+          const { x, y, level: z } = tiles[index];
+          const mesh = new THREE.Mesh(
+            makeTileGeometry(x, y, z, shellOffset),
+            new THREE.MeshBasicMaterial({
+              map: texture, side: THREE.FrontSide, depthWrite: false,
+              polygonOffset: true, polygonOffsetFactor: -1,
+            }),
+          );
+          mesh.renderOrder = 2;
+          tileLayer.add(mesh);
+        });
+        status.textContent = `World Imagery · detail level ${level} · service max ${providerMaxLevel}`;
+        window.setTimeout(() => {
+          if (status.textContent.startsWith("World Imagery")) status.textContent = "";
+        }, 1700);
+      };
+
+      const scheduleTileUpdate = () => {
+        window.clearTimeout(tileTimer);
+        tileTimer = window.setTimeout(updateTiles, 220);
+      };
+      const zoomValueForDistance = (distance) => {
+        const minimum = controls.minDistance;
+        const maximum = controls.maxDistance;
+        if (minimum <= 0 || maximum <= minimum) return 0;
+        return THREE.MathUtils.clamp(
+          1000 - Math.round(Math.log(distance / minimum) / Math.log(maximum / minimum) * 1000),
+          0,
+          1000,
+        );
+      };
+      const distanceForZoomValue = (value) => {
+        const minimum = controls.minDistance;
+        const maximum = controls.maxDistance;
+        return maximum * ((minimum / maximum) ** (Number(value) / 1000));
+      };
+      const updateZoomControls = () => {
+        const distance = camera.position.distanceTo(controls.target);
+        if (zoomTargetDistance === null) zoomSlider.value = String(zoomValueForDistance(distance));
+        const requestedLevel = requestedImageryLevel(distance);
+        const maximumLevel = Math.min(providerMaxLevel, MAX_RENDERED_LEVEL);
+        const level = maximumLevel >= 2 && requestedLevel >= 5
+          ? THREE.MathUtils.clamp(requestedLevel, Math.min(5, maximumLevel), maximumLevel)
+          : 0;
+        zoomLevel.textContent = level
+          ? `Detail ${level} · max ${maximumLevel}`
+          : "World view";
+      };
+      const updateCameraClipping = () => {
+        const distance = camera.position.distanceTo(controls.target);
+        const surfaceGap = Math.max(distance - RADIUS, 0.000001);
+        const near = Math.min(0.1, surfaceGap * 0.5);
+        const far = distance + RADIUS * 1.2 + 0.1;
+        if (camera.near !== near || camera.far !== far) {
+          camera.near = near;
+          camera.far = far;
+          camera.updateProjectionMatrix();
+        }
+      };
+      const queueZoom = (distance) => {
+        zoomTargetDistance = THREE.MathUtils.clamp(
+          distance,
+          controls.minDistance,
+          controls.maxDistance,
+        );
+      };
+      controls.addEventListener("change", () => {
+        updateZoomControls();
+        scheduleTileUpdate();
+      });
+
+      const resize = () => {
+        const width = Math.max(1, canvas.clientWidth);
+        const height = Math.max(1, canvas.clientHeight);
+        const previousFitDistance = fitDistance;
+        const currentDistance = camera.position.distanceTo(controls.target);
+        const previousZoomRatio = previousFitDistance > 0
+          ? currentDistance / previousFitDistance
+          : 1.03;
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+        renderer.setSize(width, height, false);
+        camera.aspect = width / height;
+        camera.updateProjectionMatrix();
+        const vertical = THREE.MathUtils.degToRad(camera.fov);
+        const horizontal = 2 * Math.atan(Math.tan(vertical / 2) * camera.aspect);
+        fitDistance = RADIUS / Math.sin(Math.min(vertical, horizontal) / 2) * 1.12;
+        controls.maxDistance = fitDistance * 2.5;
+        const maximumLevel = Math.min(providerMaxLevel || 12, MAX_RENDERED_LEVEL);
+        const minGap = fitDistance / (2 ** maximumLevel);
+        controls.minDistance = RADIUS + Math.max(minGap, 0.000002);
+        const direction = camera.position.clone().sub(controls.target).normalize();
+        const nextDistance = fitDistance * previousZoomRatio;
+        camera.position.copy(controls.target).addScaledVector(
+          direction,
+          THREE.MathUtils.clamp(nextDistance, controls.minDistance, controls.maxDistance),
+        );
+        zoomTargetDistance = null;
+        controls.update();
+        updateZoomControls();
+        if (componentReady && document.fullscreenElement !== stage) {
+          const frameHeight = window.matchMedia("(max-width: 640px)").matches
+            ? Math.min(requestedFrameHeight, 520)
+            : requestedFrameHeight;
+          Streamlit.setFrameHeight(frameHeight);
+        }
+        scheduleTileUpdate();
+      };
+      const resizeObserver = new ResizeObserver(resize);
+      resizeObserver.observe(stage);
+      resize();
+
+      textureLoader.load(
+        "https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg",
+        (texture) => {
+          texture.colorSpace = THREE.SRGBColorSpace;
+          texture.anisotropy = Math.min(renderer.capabilities.getMaxAnisotropy(), 8);
+          texture.wrapS = THREE.RepeatWrapping;
+          texture.offset.x = 0;
+          earth.material.dispose();
+          earth.material = new THREE.MeshPhongMaterial({
+            map: texture, specular: new THREE.Color(0x315c72), shininess: 13,
+          });
+          status.textContent = "";
+        },
+        undefined,
+        () => { status.textContent = "Base Earth texture unavailable; high-resolution imagery may still load."; },
+      );
+
+      fetch(`${IMAGE_SERVICE}?f=pjson`)
+        .then((response) => {
+          if (!response.ok) throw new Error(`Imagery service returned HTTP ${response.status}`);
+          return response.json();
+        })
+        .then((metadata) => {
+          const levels = metadata?.tileInfo?.lods?.map((lod) => lod.level).filter(Number.isFinite);
+          if (!levels?.length) throw new Error("Imagery service did not publish tile levels.");
+          providerMaxLevel = Math.max(...levels);
+          document.getElementById("credit").textContent =
+            `World Imagery: ${metadata.copyrightText || "© Esri and imagery providers"}`;
+          resize();
+        })
+        .catch((error) => {
+          controls.minDistance = RADIUS + fitDistance / 4;
+          camera.position.setLength(
+            Math.max(controls.minDistance, camera.position.distanceTo(controls.target)),
+          );
+          updateZoomControls();
+          status.textContent = `High-resolution tiles unavailable: ${error.message}`;
+        });
+
+      document.getElementById("zoom-in").addEventListener("click", () => {
+        queueZoom(camera.position.distanceTo(controls.target) / 1.25);
+      });
+      document.getElementById("zoom-out").addEventListener("click", () => {
+        queueZoom(camera.position.distanceTo(controls.target) * 1.25);
+      });
+      zoomSlider.addEventListener("input", () => {
+        queueZoom(distanceForZoomValue(zoomSlider.value));
+      });
+      document.getElementById("reset").addEventListener("click", () => {
+        earthGroup.rotation.set(0.12, -0.48, 0);
+        camera.position.set(0, 0, fitDistance * 1.08);
+        controls.target.set(0, 0, 0);
+        zoomTargetDistance = null;
+        controls.update();
+        scheduleTileUpdate();
+      });
+      autoRotateButton.addEventListener("click", () => {
+        controls.autoRotate = !controls.autoRotate;
+        controls.autoRotateSpeed = 0.45;
+        autoRotateButton.setAttribute("aria-pressed", String(controls.autoRotate));
+        autoRotateButton.setAttribute(
+          "aria-label",
+          `Auto rotate ${controls.autoRotate ? "on" : "off"}`,
+        );
+        autoRotateButton.title = controls.autoRotate
+          ? "Turn auto rotation off"
+          : "Turn auto rotation on";
+      });
+      centerLocationButton.addEventListener("click", () => {
+        if (!selectedCoordinate) return;
+        const latitude = THREE.MathUtils.degToRad(selectedCoordinate.latitude);
+        const longitude = THREE.MathUtils.degToRad(selectedCoordinate.longitude);
+        const selectedVector = new THREE.Vector3(
+          Math.cos(latitude) * Math.cos(longitude),
+          Math.sin(latitude),
+          -Math.cos(latitude) * Math.sin(longitude),
+        ).normalize();
+        const cameraDirection = camera.position.clone().sub(controls.target).normalize();
+        const localCameraDirection = cameraDirection.applyQuaternion(
+          earthGroup.quaternion.clone().invert(),
+        );
+        const correction = new THREE.Quaternion().setFromUnitVectors(
+          selectedVector,
+          localCameraDirection,
+        );
+        earthGroup.quaternion.multiply(correction);
+        earthGroup.updateMatrixWorld(true);
+        scheduleTileUpdate();
+      });
+
+      const fullscreen = document.getElementById("fullscreen");
+      fullscreen.addEventListener("click", async () => {
+        try {
+          if (document.fullscreenElement === stage) await document.exitFullscreen();
+          else await stage.requestFullscreen();
+        } catch (error) {
+          status.textContent = `Fullscreen unavailable: ${error.message}`;
+        }
+      });
+      const updateFullscreenButton = () => {
+        const isFullscreen = document.fullscreenElement === stage;
+        fullscreen.textContent = isFullscreen ? "×" : "⛶";
+        fullscreen.setAttribute(
+          "aria-label",
+          isFullscreen ? "Exit fullscreen" : "Enter fullscreen",
+        );
+        fullscreen.title = isFullscreen ? "Exit fullscreen" : "Enter fullscreen";
+        resize();
+      };
+      document.addEventListener("fullscreenchange", updateFullscreenButton);
+
+      const raycaster = new THREE.Raycaster();
+      const pointer = new THREE.Vector2();
+      const controlsPanel = document.querySelector(".controls");
+      let pointerStart = null;
+      let ignoreGlobeClicksUntil = 0;
+      const suppressGlobeClick = () => {
+        pointerStart = null;
+        ignoreGlobeClicksUntil = performance.now() + 300;
+      };
+      controlsPanel.addEventListener("pointerdown", suppressGlobeClick, true);
+      controlsPanel.addEventListener("click", suppressGlobeClick, true);
+      canvas.addEventListener("pointerdown", (event) => {
+        pointerStart = { x: event.clientX, y: event.clientY };
+      });
+      canvas.addEventListener("pointercancel", () => {
+        pointerStart = null;
+      });
+      canvas.addEventListener("pointerup", (event) => {
+        if (!pointerStart || Math.hypot(event.clientX - pointerStart.x, event.clientY - pointerStart.y) > 5) {
+          pointerStart = null;
+          return;
+        }
+        pointerStart = null;
+        if (
+          event.target !== canvas
+          || performance.now() < ignoreGlobeClicksUntil
+          || controlsPanel.contains(document.elementFromPoint(event.clientX, event.clientY))
+        ) return;
+        const bounds = canvas.getBoundingClientRect();
+        pointer.x = ((event.clientX - bounds.left) / bounds.width) * 2 - 1;
+        pointer.y = -((event.clientY - bounds.top) / bounds.height) * 2 + 1;
+        raycaster.setFromCamera(pointer, camera);
+        const hit = raycaster.intersectObject(earth, false)[0];
+        if (!hit) return;
+        const localPoint = earthGroup.worldToLocal(hit.point.clone()).normalize();
+        const latitude = Math.asin(THREE.MathUtils.clamp(localPoint.y, -1, 1)) * 180 / Math.PI;
+        const longitude = Math.atan2(-localPoint.z, localPoint.x) * 180 / Math.PI;
+        const normalizedLongitude = ((longitude + 540) % 360) - 180;
+        setMarker({ latitude, longitude: normalizedLongitude });
+        Streamlit.setComponentValue({
+          latitude: Number(latitude.toFixed(6)),
+          longitude: Number(normalizedLongitude.toFixed(6)),
+          clickId: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          source: "globe",
+        });
+      });
+
+      const onRender = (event) => {
+        const args = event.detail.args || {};
+        setMarker(args.selected || null);
+        requestedFrameHeight = args.height || 640;
+        const frameHeight = window.matchMedia("(max-width: 640px)").matches
+          ? Math.min(requestedFrameHeight, 520)
+          : requestedFrameHeight;
+        Streamlit.setFrameHeight(frameHeight);
+      };
+      Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, onRender);
+      componentReady = true;
+      Streamlit.setComponentReady();
+      Streamlit.setFrameHeight(
+        window.matchMedia("(max-width: 640px)").matches
+          ? Math.min(requestedFrameHeight, 520)
+          : requestedFrameHeight,
+      );
+
+      let animationFrame = 0;
+      const clock = new THREE.Clock();
+      const animate = () => {
+        animationFrame = requestAnimationFrame(animate);
+        const delta = Math.min(clock.getDelta(), 0.05);
+        if (zoomTargetDistance !== null) {
+          const direction = camera.position.clone().sub(controls.target).normalize();
+          const currentDistance = camera.position.distanceTo(controls.target);
+          const nextDistance = THREE.MathUtils.damp(
+            currentDistance,
+            zoomTargetDistance,
+            10,
+            delta,
+          );
+          camera.position.copy(controls.target).addScaledVector(direction, nextDistance);
+          if (Math.abs(nextDistance - zoomTargetDistance) < 0.0001) {
+            camera.position.copy(controls.target).addScaledVector(direction, zoomTargetDistance);
+            zoomTargetDistance = null;
+            updateZoomControls();
+          }
+        }
+        controls.update(delta);
+        updateCameraClipping();
+        updateMarkerScale();
+        if (
+          controls.autoRotate
+          && providerMaxLevel
+          && Date.now() - lastAutoRotateTileUpdate > 1200
+        ) {
+          lastAutoRotateTileUpdate = Date.now();
+          scheduleTileUpdate();
+        }
+        renderer.render(scene, camera);
+      };
+      animate();
+      window.addEventListener("beforeunload", () => {
+        cancelAnimationFrame(animationFrame);
+        resizeObserver.disconnect();
+        document.removeEventListener("fullscreenchange", updateFullscreenButton);
+        for (const child of [...tileLayer.children]) {
+          child.geometry.dispose();
+          child.material.dispose();
+        }
+        for (const texture of tileCache.values()) texture.dispose();
+        earth.geometry.dispose();
+        earth.material.map?.dispose();
+        earth.material.dispose();
+        marker.geometry.dispose();
+        marker.material.dispose();
+        atmosphere.geometry.dispose();
+        atmosphere.material.dispose();
+        controls.dispose();
+        renderer.dispose();
+      }, { once: true });
+    } catch (error) {
+      status.textContent = `Interactive Earth could not start: ${error.message}`;
+      console.error("EARTH PULSE interactive globe error:", error);
+    }
+  </script>
+</body>
+</html>

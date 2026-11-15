@@ -11,12 +11,12 @@ def _annual_series(monthly: pd.DataFrame, variable: str) -> pd.Series:
     clean = prepare_monthly_series(monthly, variable)
     clean = clean.dropna(subset=["display_value"])
     if VARIABLES[variable]["kind"] == "rain":
-        annual = clean.groupby("year")["display_value"].sum(min_count=10)
+        annual = clean.groupby("year")["display_value"].sum(min_count=12)
     else:
         # Calendar-day weighting avoids treating February and a 31-day month equally.
         weighted = clean["display_value"] * clean["days"]
-        annual_num = weighted.groupby(clean["year"]).sum(min_count=10)
-        annual_den = clean["days"].groupby(clean["year"]).sum(min_count=10)
+        annual_num = weighted.groupby(clean["year"]).sum(min_count=12)
+        annual_den = clean["days"].groupby(clean["year"]).sum(min_count=12)
         annual = annual_num / annual_den
     annual.index = annual.index.astype(int)
     return annual.dropna().sort_index()
@@ -44,7 +44,10 @@ def hamed_rao_mann_kendall(values: np.ndarray, alpha: float = 0.05) -> dict:
     x = x[np.isfinite(x)]
     n = len(x)
     if n < 8:
-        raise ValueError("At least 8 annual values are required for the trend test.")
+        raise ValueError(
+            "Analysis cannot be completed reliably: at least 8 annual values are "
+            "required for the trend test."
+        )
 
     # Mann–Kendall S statistic.
     s = 0
@@ -90,6 +93,14 @@ def hamed_rao_mann_kendall(values: np.ndarray, alpha: float = 0.05) -> dict:
 
 
 def analyze_series(monthly: pd.DataFrame, variable: str, source: str | None = None) -> dict:
+    if variable not in VARIABLES:
+        raise ValueError(f"Unsupported variable: {variable}")
+    if not VARIABLES[variable].get("trend_supported", True):
+        raise ValueError(
+            f"A long-term statistical trend is not reported for {variable} because "
+            "NASA POWER combines source products across the record. Monthly observations "
+            "and seasonal summaries remain available."
+        )
     prepared = prepare_monthly_series(monthly, variable)
     expected_count = len(prepared)
     valid_count = int(prepared["display_value"].notna().sum())
@@ -97,10 +108,17 @@ def analyze_series(monthly: pd.DataFrame, variable: str, source: str | None = No
     annual = _annual_series(monthly, variable)
 
     if len(annual) < 8:
-        raise ValueError("At least 8 complete annual values are needed for a cautious trend test. Choose a longer period.")
+        raise ValueError(
+            "Analysis cannot be completed reliably: at least 8 complete annual values "
+            "are needed for a cautious trend test. Choose a longer period."
+        )
     years = annual.index.to_numpy(dtype=float)
     if len(years) > 1 and not np.all(np.diff(years) == 1):
-        raise ValueError("One or more whole years have too many missing months for annual aggregation. Choose a different time range or inspect data completeness.")
+        raise ValueError(
+            "Analysis cannot be completed reliably: one or more whole years have too "
+            "many missing months for annual aggregation. Choose a different time range "
+            "or inspect data completeness."
+        )
 
     values = annual.to_numpy(dtype=float)
     test = hamed_rao_mann_kendall(values, alpha=0.05)
@@ -126,12 +144,31 @@ def analyze_series(monthly: pd.DataFrame, variable: str, source: str | None = No
         "kind": VARIABLES[variable]["kind"],
         "source": source or monthly.attrs.get("source", "Unknown source"),
         "parameter": monthly.attrs.get("parameter", VARIABLES[variable]["parameter"]),
+        "dataset": monthly.attrs.get("dataset", "NASA POWER; dataset not identified"),
+        "api_title": monthly.attrs.get("api_title", "not provided"),
+        "api_long_name": monthly.attrs.get("api_long_name", "not provided"),
+        "api_parameter_metadata": monthly.attrs.get("api_parameter_metadata", {}),
+        "api_unit": monthly.attrs.get("api_unit", "not provided"),
+        "display_unit": monthly.attrs.get("display_unit", VARIABLES[variable]["unit"]),
+        "spatial_resolution": monthly.attrs.get("spatial_resolution", "not provided by response"),
+        "api_latitude": monthly.attrs.get("api_latitude"),
+        "api_longitude": monthly.attrs.get("api_longitude"),
+        "api_elevation_m": monthly.attrs.get("api_elevation_m"),
+        "response_header": monthly.attrs.get("response_header", {}),
         "api_version": monthly.attrs.get("api_version", "unknown"),
         "data_sources": monthly.attrs.get("data_sources", "unknown"),
         "request_url": monthly.attrs.get("request_url", "unavailable"),
+        "retrieved_at": monthly.attrs.get("retrieved_at", "not provided"),
+        "requested_start": monthly.attrs.get("requested_start", "not provided"),
+        "requested_end": monthly.attrs.get("requested_end", "not provided"),
         "completeness": completeness,
         "valid_months": valid_count,
         "expected_months": expected_count,
+        "missing_months": expected_count - valid_count,
+        "latest_valid_date": monthly.attrs.get(
+            "latest_valid_date",
+            str(prepared.loc[prepared["display_value"].notna()].index.max().date()),
+        ),
         "start": str(prepared.loc[prepared["display_value"].notna()].index.min().date()),
         "end": str(prepared.loc[prepared["display_value"].notna()].index.max().date()),
         "years_count": len(annual),

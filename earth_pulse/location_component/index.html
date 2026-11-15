@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { margin: 0; color: #eaf1f0; font: 14px "DM Sans", sans-serif; }
+    button {
+      min-height: 42px; padding: 0 16px; border: 1px solid #5b9b82;
+      border-radius: 12px; background: #a5e8c5; color: #092019;
+      font: 700 14px "DM Sans", sans-serif; cursor: pointer;
+    }
+    button:hover { background: #c0f2d7; }
+    button:focus-visible { outline: 2px solid #d5f7e4; outline-offset: 2px; }
+    #status { margin: 8px 0 0; color: #bfd0c9; }
+    #confirm { margin: 8px 0 0; }
+    #confirm[hidden] { display: none; }
+  </style>
+</head>
+<body>
+  <button id="locate" type="button">Use My Current Location</button>
+  <div id="status" role="status" aria-live="polite"></div>
+  <button id="confirm" type="button" hidden>Confirm this location</button>
+  <script>
+    const button = document.getElementById("locate");
+    const confirmButton = document.getElementById("confirm");
+    const status = document.getElementById("status");
+    let args = {};
+    let pendingLocation = null;
+
+    function setValue(value) {
+      window.parent.postMessage({
+        isStreamlitMessage: true,
+        type: "streamlit:setComponentValue",
+        value,
+        dataType: "json"
+      }, "*");
+    }
+
+    button.addEventListener("click", () => {
+      pendingLocation = null;
+      confirmButton.hidden = true;
+      setValue({ status: "pending", requestId: Date.now() });
+      if (!navigator.geolocation) {
+        status.textContent = args.unavailableText || "Browser location is unavailable. Enter coordinates manually.";
+        setValue({ status: "unavailable", requestId: Date.now() });
+        return;
+      }
+      status.textContent = args.pendingText || "Requesting location permission…";
+      navigator.geolocation.getCurrentPosition(
+        ({ coords, timestamp }) => {
+          pendingLocation = {
+            latitude: coords.latitude,
+            longitude: coords.longitude,
+            accuracy: coords.accuracy,
+            timestamp
+          };
+          status.textContent = `${args.successText || "Location detected."} ${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)} · ±${Math.round(coords.accuracy)} m`;
+          confirmButton.textContent = args.confirmLabel || "Confirm this location";
+          confirmButton.hidden = false;
+        },
+        (error) => {
+          const denied = error.code === error.PERMISSION_DENIED;
+          status.textContent = denied
+            ? (args.deniedText || "Location permission was denied. Enter coordinates manually.")
+            : (args.unavailableText || "Could not detect location. Enter coordinates manually.");
+          setValue({ status: denied ? "denied" : "unavailable", requestId: Date.now() });
+        },
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }
+      );
+    });
+
+    confirmButton.addEventListener("click", () => {
+      if (!pendingLocation) return;
+      status.textContent = args.confirmedText || "Location confirmed for this investigation.";
+      setValue({
+        status: "granted",
+        ...pendingLocation,
+        requestId: Date.now()
+      });
+    });
+
+    window.addEventListener("message", (event) => {
+      if (event.source === window.parent
+        && event.data
+        && typeof event.data === "object"
+        && event.data.type === "streamlit:render") {
+        args = event.data.args || {};
+        button.textContent = args.buttonLabel || "Use My Current Location";
+        if (!status.textContent) {
+          status.textContent = args.helpText || "";
+        }
+      }
+    });
+
+    window.parent.postMessage({ isStreamlitMessage: true, type: "streamlit:componentReady", apiVersion: 1 }, "*");
+    window.parent.postMessage({ isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: 142 }, "*");
+  </script>
+</body>
+</html>

@@ -1,0 +1,105 @@
+{
+  "farmer_regions": [
+    {
+      "name": "Nashik",
+      "district": "Nashik",
+      "state": "Maharashtra",
+      "country": "India",
+      "latitude": 19.9975,
+      "longitude": 73.7898,
+      "category": "Farmer-focused pilot",
+      "source": "Representative testing point only; not an Agriculture Census ranking. Verify district-level holdings and crop context before making public claims. Reference: https://agcensus.gov.in/",
+      "crops": []
+    },
+    {
+      "name": "Bathinda",
+      "district": "Bathinda",
+      "state": "Punjab",
+      "country": "India",
+      "latitude": 30.2110,
+      "longitude": 74.9455,
+      "category": "Farmer-focused pilot",
+      "source": "Representative testing point only; not an Agriculture Census ranking. Verify district-level holdings and crop context before making public claims. Reference: https://agcensus.gov.in/",
+      "crops": []
+    },
+    {
+      "name": "Anantapur",
+      "district": "Anantapur",
+      "state": "Andhra Pradesh",
+      "country": "India",
+      "latitude": 14.6819,
+      "longitude": 77.6006,
+      "category": "Farmer-focused pilot",
+      "source": "Representative testing point only; not an Agriculture Census ranking. Verify district-level holdings and crop context before making public claims. Reference: https://agcensus.gov.in/",
+      "crops": []
+    },
+    {
+      "name": "Raipur",
+      "district": "Raipur",
+      "state": "Chhattisgarh",
+      "country": "India",
+      "latitude": 21.2514,
+      "longitude": 81.6296,
+      "category": "Farmer-focused pilot",
+      "source": "Representative testing point only; not an Agriculture Census ranking. Verify district-level holdings and crop context before making public claims. Reference: https://agcensus.gov.in/",
+      "crops": []
+    },
+    {
+      "name": "Bengaluru",
+      "district": "Bengaluru Urban",
+      "state": "Karnataka",
+      "country": "India",
+      "latitude": 12.9716,
+      "longitude": 77.5946,
+      "category": "Farmer-focused pilot",
+      "source": "Representative testing point only; not an Agriculture Census ranking. Verify district-level holdings and crop context before making public claims. Reference: https://agcensus.gov.in/",
+      "crops": []
+    }
+  ],
+  "trade_markets": [
+    {
+      "name": "Lasalgaon",
+      "district": "Nashik",
+      "state": "Maharashtra",
+      "country": "India",
+      "latitude": 20.1461,
+      "longitude": 74.2383,
+      "category": "Agricultural trade / mandi pilot",
+      "source": "Starting candidate for testing, not a national ranking or a claim about current market listings. Verify with e-NAM or AGMARKNET before operational use: https://enam.gov.in/ and https://agmarknet.gov.in/",
+      "crops": []
+    },
+    {
+      "name": "Azadpur",
+      "district": "North West Delhi",
+      "state": "Delhi",
+      "country": "India",
+      "latitude": 28.7041,
+      "longitude": 77.1800,
+      "category": "Agricultural trade / mandi pilot",
+      "source": "Starting candidate for testing, not a national ranking or a claim about current market listings. Verify with e-NAM or AGMARKNET before operational use: https://enam.gov.in/ and https://agmarknet.gov.in/",
+      "crops": []
+    },
+    {
+      "name": "Solapur",
+      "district": "Solapur",
+      "state": "Maharashtra",
+      "country": "India",
+      "latitude": 17.6599,
+      "longitude": 75.9064,
+      "category": "Agricultural trade / mandi pilot",
+      "source": "Starting candidate for testing, not a national ranking or a claim about current market listings. Verify with e-NAM or AGMARKNET before operational use: https://enam.gov.in/ and https://agmarknet.gov.in/",
+      "crops": []
+    },
+    {
+      "name": "Bengaluru",
+      "district": "Bengaluru Urban",
+      "state": "Karnataka",
+      "country": "India",
+      "latitude": 12.9716,
+      "longitude": 77.5946,
+      "category": "Agricultural trade / mandi pilot",
+      "source": "Starting candidate for testing, not a national ranking or a claim about current market listings. Verify with e-NAM or AGMARKNET before operational use: https://enam.gov.in/ and https://agmarknet.gov.in/",
+      "crops": []
+    }
+  ]
+}
